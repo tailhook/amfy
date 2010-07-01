@@ -2,7 +2,7 @@ from io import BytesIO
 
 from .core import Dumper, Loader, undefined
 
-def dump(data, proto=3, stream=None, Dumper=Dumper):
+def dump(data, stream=None, proto=3, Dumper=Dumper):
     if stream is None:
         stream = BytesIO()
     Dumper().dump(data, stream, proto=proto)
