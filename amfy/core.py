@@ -1,6 +1,7 @@
 from io import BytesIO
 import struct
 import datetime, time
+from collections import OrderedDict
 from weakref import WeakKeyDictionary as weakdict
 
 class Undefined(object):
@@ -77,14 +78,20 @@ class Loader(object):
         elif marker ==  0x09:
             num = self._read_vli(stream)
             if num & 1:
-                res = OrderedDict()
-                for i in range(num >> 1):
-                    res[i] = self._read_item(stream, context)
+                res = None
                 while True:
-                    val = self._read_item(stream, context)
-                    if val == '': break
-                    res[val] = self._read_item(stream, context)
-                context.add_object(res)
+                    val = self._read_string3(stream, context)
+                    if val == '':
+                        if res is None:
+                            res = [None]*(num >> 1)
+                            context.add_object(res)
+                        break
+                    elif res is None:
+                        res = OrderedDict()
+                        context.add_object(res)
+                    res[val] = self._read_item3(stream, context)
+                for i in range(num >> 1):
+                    res[i] = self._read_item3(stream, context)
             else:
                 res = context.get_object(num >> 1)
             return res
@@ -93,21 +100,31 @@ class Loader(object):
             if num & 1:
                 if num & 2:
                     if num & 4: # traits-ext
-                        trait = Traits()
+                        trait = Trait()
                         raise NotImplementedError('Traits ext')
                     else: # traits
                         dyn = bool(num & 8)
                         memb = num >> 4
-                        trait = Traits(dyn,
-                            self._read_string(stream),
-                            (self._read_string(stream, context)
+                        trait = Trait(dyn,
+                            self._read_string3(stream, context),
+                            (self._read_string3(stream, context)
                                 for i in range(memb)))
                 else: # traits-ref
                     trait = context.get_trait(num >> 2)
-                print(trait.classname, trait.members)
-                context.add_object(res)
+                context.add_object(trait)
             else:
-                res = context.get_object(num)
+                context.get_object(num)
+            if trait.members:
+                raise NotImplementedError("Trait members")
+            if not trait.dynamic:
+                raise NotImplementedError("Dynamic trait")
+            res = {}
+            while True:
+                key = self._read_string3(stream, context)
+                if key == "":
+                    break
+                value = self._read_item3(stream, context)
+                res[key] = value
             return res
         elif marker ==  0x0B:
             # xml
@@ -126,9 +143,9 @@ class Loader(object):
     def _read_vli(self, stream):
         val = 0
         while True:
-            byte = stream.read(1)
-            val = (val << 8) | (byte & 127)
-            if not (byte & 128):
+            byte = stream.read(1)[0]
+            val = (val << 7) | (byte & 0x7f)
+            if not (byte & 0x80):
                 break
         return val
 
@@ -198,7 +215,6 @@ class Loader(object):
             return res
         elif marker == 0x0B: # date
             val = struct.unpack('!d', stream.read(8))[0]
-            print("UNSERIAL", val)
             res = datetime.datetime.utcfromtimestamp(val/1000)
             tz = stream.read(2)
             assert tz == b'\x00\x00'
@@ -219,6 +235,8 @@ class Trait(object):
         self.dynamic = dynamic
         self.members = tuple(members)
         self.classname = classname
+
+anonymous_trait = Trait(True, "")
 
 class Dumper(object):
 
@@ -274,8 +292,6 @@ class Dumper(object):
         elif isinstance(data, datetime.datetime):
             stream.write(b'\x0b' + struct.pack('!d',
                 time.mktime(data.utctimetuple())*1000) + b'\x00\x00')
-        #~ elif marker == 0x11: # AVM+
-            #~ return self._read_item3(stream, context)
         else:
             raise NotImplementedError("Type {!r}".format(type(data)))
 
@@ -284,6 +300,87 @@ class Dumper(object):
         stream.write(struct.pack('!H', len(data)))
         stream.write(data)
 
+
+    def _write_item3(self, data, stream, context):
+        if data is undefined:
+            stream.write(b'\x00')
+        elif data is None:
+            stream.write(b'\x01')
+        elif data is False:
+            stream.write(b'\x02')
+        elif data is True:
+            stream.write(b'\x03')
+        elif isinstance(data, int) and data >= 0 and data < (1 << 31):
+            stream.write(b'\x04')
+            self._write_vli(data, stream)
+        elif isinstance(data, (int, float)):
+            stream.write(b'\x05' + struct.pack('!d', data))
+        elif isinstance(data, str):
+            stream.write(b'\x06')
+            self._write_string3(data, stream, context)
+        elif isinstance(data, datetime.datetime):
+            stream.write(b'\x08')
+            ref = context.get_object(data)
+            if ref is not None:
+                self._write_vli((ref << 1), stream)
+            else:
+                self._write_vli(1, stream)
+                stream.write(struct.pack('!d',
+                    time.mktime(data.utctimetuple())*1000))
+                context.add_object(data)
+        elif isinstance(data, dict):
+            stream.write(b'\x0A')
+            ref = context.get_object(data)
+            if ref is not None:
+                self._write_vli((ref << 1), stream)
+            else:
+                ref = context.get_trait(anonymous_trait)
+                if ref is not None:
+                    self._write_vli((ref << 2), stream)
+                else:
+                    context.add_trait(anonymous_trait)
+                    self._write_vli(11, stream)
+                    self._write_string3(anonymous_trait.classname, stream, context)
+                for k, v in data.items():
+                    self._write_string3(k, stream, context)
+                    self._write_item3(v, stream, context)
+                self._write_string3("", stream, context)
+        elif isinstance(data, list):
+            stream.write(b'\x09')
+            ref = context.get_object(data)
+            if ref is not None:
+                self._write_vli((ref << 1), stream)
+            else:
+                context.add_object(data)
+                self._write_vli((len(data) << 1)|1, stream)
+                self._write_string3("", stream, context)
+                for i in data:
+                    self._write_item3(i, stream, context)
+        else:
+            raise NotImplementedError("Type {!r}".format(type(data)))
+
+    def _write_vli(self, data, stream):
+        ba = bytearray()
+        if not data:
+            stream.write(b'\x00')
+            return
+        while data:
+            ba.append((data & 0x7f) | 0x80)
+            data >>= 7
+        ba.reverse()
+        ba[-1] &= 0x7f
+        stream.write(ba)
+
+    def _write_string3(self, data, stream, context):
+        ref = context.get_string(data)
+        if data and ref is not None:
+            self._write_vli(ref << 1, stream)
+        else:
+            if data:
+                context.add_string(data)
+            data = data.encode('utf-8')
+            self._write_vli((len(data) << 1)|1, stream)
+            stream.write(data)
 
 class ReadContext(object):
     def __init__(self):

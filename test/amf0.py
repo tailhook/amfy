@@ -23,7 +23,8 @@ class Roundtrip(unittest.TestCase):
 
     def _run(self, data):
         for val in data:
-            self.assertEquals(amfy.load(val[1], proto=0), val[2] if len(val) > 2 else val[0])
+            self.assertEquals(amfy.load(val[1], proto=0),
+                val[2] if len(val) > 2 else val[0])
             self.assertEquals(amfy.dump(val[0], proto=0), val[1])
 
     def test_number(self):
