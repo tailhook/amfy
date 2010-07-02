@@ -55,7 +55,11 @@ class Roundtrip(unittest.TestCase):
     def test_object(self):
         self._run([
             ({'a': 'spam', 'b': 5},
-                b'\n\x0b\x01\x03a\x06\tspam\x03b\x04\x05\x01')])
+                b'\n\x0b\x01\x03a\x06\tspam\x03b\x04\x05\x01'),
+            ([{'a': 'spam', 'b': 5},
+              {'a': 'nospam', 'b': 'test'}],
+              b'\t\x05\x01\n\x0b\x01\x03a\x06\tspam\x03b\x04\x05\x01\n\x01\x00\x06\rnospam\x04\x06\ttest\x01'),
+            ])
 
     def test_date(self):
         import datetime

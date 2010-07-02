@@ -109,11 +109,11 @@ class Loader(object):
                             self._read_string3(stream, context),
                             (self._read_string3(stream, context)
                                 for i in range(memb)))
+                    context.add_trait(trait)
                 else: # traits-ref
                     trait = context.get_trait(num >> 2)
-                context.add_object(trait)
             else:
-                context.get_object(num)
+                return context.get_object(num >> 1)
             if trait.members:
                 raise NotImplementedError("Trait members")
             if not trait.dynamic:
@@ -336,7 +336,7 @@ class Dumper(object):
             else:
                 ref = context.get_trait(anonymous_trait)
                 if ref is not None:
-                    self._write_vli((ref << 2), stream)
+                    self._write_vli((ref << 2)|1, stream)
                 else:
                     context.add_trait(anonymous_trait)
                     self._write_vli(11, stream)
