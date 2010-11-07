@@ -1,7 +1,7 @@
 from distutils.core import setup
 
 setup(name='Amfy',
-      version='0.1',
+      version='0.1.1',
       description='AMF serializer/deserializer for python3',
       author='Paul Colomiets',
       author_email='pc@gafol.net',

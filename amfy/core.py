@@ -356,6 +356,15 @@ class Dumper(object):
                 self._write_string3("", stream, context)
                 for i in data:
                     self._write_item3(i, stream, context)
+        elif isinstance(data, bytes):
+            stream.write(b'\x0C')
+            ref = context.get_object(data)
+            if ref is not None:
+                self._write_vli((ref << 1), stream)
+            else:
+                context.add_object(data)
+                self._write_vli((len(data) << 1)|1, stream)
+                stream.write(data)
         else:
             raise NotImplementedError("Type {!r}".format(type(data)))
 
